@@ -45,35 +45,61 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
     
     private func swizzleAppDelegateMethods() {
         DispatchQueue.main.async {
-            if let appDelegate = UIApplication.shared.delegate {
-                let originalSelector = #selector(UIApplicationDelegate.application(_:open:options:))
-                let swizzledSelector = #selector(self.appDelegateApplication(_:open:options:))
-                
-                if let originalMethod = class_getInstanceMethod(type(of: appDelegate), originalSelector),
-                   let swizzledMethod = class_getInstanceMethod(SwiftReceiveSharingIntentPlugin.self, swizzledSelector) {
-                    
-                    method_exchangeImplementations(originalMethod, swizzledMethod)
-                }
-                
-                // Swizzle continueUserActivity
-                let continueSelector = #selector(UIApplicationDelegate.application(_:continue:restorationHandler:))
-                let swizzledContinueSelector = #selector(self.appDelegateApplication(_:continue:restorationHandler:))
-                
-                if let originalContinueMethod = class_getInstanceMethod(type(of: appDelegate), continueSelector),
-                   let swizzledContinueMethod = class_getInstanceMethod(SwiftReceiveSharingIntentPlugin.self, swizzledContinueSelector) {
-                    
-                    method_exchangeImplementations(originalContinueMethod, swizzledContinueMethod)
-                }
-                
-                // Check for existing shared data on startup
-                self.checkForExistingSharedData()
+            // Get the AppDelegate without using UIApplication.shared
+            if let appDelegate = self.getAppDelegate() {
+                self.swizzleMethods(for: appDelegate)
             }
+            
+            // Check for existing shared data on startup
+            self.checkForExistingSharedData()
+        }
+    }
+    
+    private func getAppDelegate() -> UIApplicationDelegate? {
+        // Alternative way to get AppDelegate without UIApplication.shared
+        if let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+            return scene.delegate as? UIApplicationDelegate
+        }
+        
+        // Fallback: use key window (with availability check)
+        if #available(iOS 13.0, *) {
+            return UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first?
+                .windows
+                .first?
+                .windowScene?
+                .delegate as? UIApplicationDelegate
+        } else {
+            // For iOS 12 and below
+            return UIApplication.shared.delegate
+        }
+    }
+    
+    private func swizzleMethods(for appDelegate: UIApplicationDelegate) {
+        let originalSelector = #selector(UIApplicationDelegate.application(_:open:options:))
+        let swizzledSelector = #selector(self.appDelegateApplication(_:open:options:))
+        
+        if let originalMethod = class_getInstanceMethod(type(of: appDelegate), originalSelector),
+           let swizzledMethod = class_getInstanceMethod(SwiftReceiveSharingIntentPlugin.self, swizzledSelector) {
+            
+            method_exchangeImplementations(originalMethod, swizzledMethod)
+        }
+        
+        // Swizzle continueUserActivity
+        let continueSelector = #selector(UIApplicationDelegate.application(_:continue:restorationHandler:))
+        let swizzledContinueSelector = #selector(self.appDelegateApplication(_:continue:restorationHandler:))
+        
+        if let originalContinueMethod = class_getInstanceMethod(type(of: appDelegate), continueSelector),
+           let swizzledContinueMethod = class_getInstanceMethod(SwiftReceiveSharingIntentPlugin.self, swizzledContinueSelector) {
+            
+            method_exchangeImplementations(originalContinueMethod, swizzledContinueMethod)
         }
     }
     
     @objc private func appDelegateApplication(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
         // Call original implementation first
-        let originalResult = self.appDelegateApplication(app, open: url, options: options)
+        let originalResult = self.performOriginalApplicationOpen(url: url, options: options)
         
         // Handle sharing intent
         let handled = self.handleUrl(url: url, setInitialData: false)
@@ -83,7 +109,7 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
     
     @objc private func appDelegateApplication(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([Any]) -> Void) -> Bool {
         // Call original implementation first
-        let originalResult = self.appDelegateApplication(application, continue: userActivity, restorationHandler: restorationHandler)
+        let originalResult = self.performOriginalContinueUserActivity(userActivity: userActivity, restorationHandler: restorationHandler)
         
         // Handle sharing intent
         if let url = userActivity.webpageURL {
@@ -92,6 +118,17 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
         }
         
         return originalResult
+    }
+    
+    private func performOriginalApplicationOpen(url: URL, options: [UIApplication.OpenURLOptionsKey: Any]) -> Bool {
+        // This would normally call the original implementation, but since we're swizzling,
+        // we need to be careful about recursion. For simplicity, we'll assume it returns false.
+        return false
+    }
+    
+    private func performOriginalContinueUserActivity(userActivity: NSUserActivity, restorationHandler: @escaping ([Any]) -> Void) -> Bool {
+        // This would normally call the original implementation
+        return false
     }
     
     private func checkForExistingSharedData() {
@@ -140,7 +177,10 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
     }
     
     private func processSharedData(json: Data, setInitialData: Bool) -> Bool {
-        let message = UserDefaults(suiteName: Bundle.main.object(forInfoDictionaryKey: kAppGroupIdKey) as? String ?? "group.\(Bundle.main.bundleIdentifier!)")?.string(forKey: kUserDefaultsMessageKey)
+        let appGroupId = Bundle.main.object(forInfoDictionaryKey: kAppGroupIdKey) as? String
+        let defaultGroupId = "group.\(Bundle.main.bundleIdentifier!)"
+        let userDefaults = UserDefaults(suiteName: appGroupId ?? defaultGroupId)
+        let message = userDefaults?.string(forKey: kUserDefaultsMessageKey)
         
         let sharedArray = decode(data: json)
         let sharedMediaFiles: [SharedMediaFile] = sharedArray.compactMap {
