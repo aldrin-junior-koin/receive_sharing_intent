@@ -7,7 +7,7 @@ public let kUserDefaultsKey = "ShareKey"
 public let kUserDefaultsMessageKey = "ShareMessageKey"
 public let kAppGroupIdKey = "AppGroupId"
 
-public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, FlutterApplicationLifeCycleDelegate {
+public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     static let kMessagesChannel = "receive_sharing_intent/messages"
     static let kEventsChannelMedia = "receive_sharing_intent/events-media"
     
@@ -24,8 +24,8 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
         let chargingChannelMedia = FlutterEventChannel(name: kEventsChannelMedia, binaryMessenger: registrar.messenger())
         chargingChannelMedia.setStreamHandler(instance)
         
-        // Register as application lifecycle delegate - NO AppDelegate changes needed!
-        registrar.addApplicationDelegate(instance)
+        // Use method swizzling to handle AppDelegate events without requiring modifications
+        instance.swizzleAppDelegateMethods()
     }
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -41,32 +41,68 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
         }
     }
     
-    // MARK: - FlutterApplicationLifeCycleDelegate methods
+    // MARK: - Method Swizzling for AppDelegate Integration
     
-    public func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [AnyHashable : Any] = [:]) -> Bool {
-        if let url = launchOptions[UIApplication.LaunchOptionsKey.url] as? URL {
-            return handleUrl(url: url, setInitialData: true)
-        } else if let activityDictionary = launchOptions[UIApplication.LaunchOptionsKey.userActivityDictionary] as? [AnyHashable: Any] {
-            for key in activityDictionary.keys {
-                if let userActivity = activityDictionary[key] as? NSUserActivity {
-                    if let url = userActivity.webpageURL {
-                        return handleUrl(url: url, setInitialData: true)
-                    }
+    private func swizzleAppDelegateMethods() {
+        DispatchQueue.main.async {
+            if let appDelegate = UIApplication.shared.delegate {
+                let originalSelector = #selector(UIApplicationDelegate.application(_:open:options:))
+                let swizzledSelector = #selector(self.appDelegateApplication(_:open:options:))
+                
+                if let originalMethod = class_getInstanceMethod(type(of: appDelegate), originalSelector),
+                   let swizzledMethod = class_getInstanceMethod(SwiftReceiveSharingIntentPlugin.self, swizzledSelector) {
+                    
+                    method_exchangeImplementations(originalMethod, swizzledMethod)
                 }
+                
+                // Swizzle continueUserActivity
+                let continueSelector = #selector(UIApplicationDelegate.application(_:continue:restorationHandler:))
+                let swizzledContinueSelector = #selector(self.appDelegateApplication(_:continue:restorationHandler:))
+                
+                if let originalContinueMethod = class_getInstanceMethod(type(of: appDelegate), continueSelector),
+                   let swizzledContinueMethod = class_getInstanceMethod(SwiftReceiveSharingIntentPlugin.self, swizzledContinueSelector) {
+                    
+                    method_exchangeImplementations(originalContinueMethod, swizzledContinueMethod)
+                }
+                
+                // Check for existing shared data on startup
+                self.checkForExistingSharedData()
             }
         }
-        return true
     }
     
-    public func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
-        return handleUrl(url: url, setInitialData: false)
+    @objc private func appDelegateApplication(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        // Call original implementation first
+        let originalResult = self.appDelegateApplication(app, open: url, options: options)
+        
+        // Handle sharing intent
+        let handled = self.handleUrl(url: url, setInitialData: false)
+        
+        return originalResult || handled
     }
     
-    public func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([Any]) -> Void) -> Bool {
+    @objc private func appDelegateApplication(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([Any]) -> Void) -> Bool {
+        // Call original implementation first
+        let originalResult = self.appDelegateApplication(application, continue: userActivity, restorationHandler: restorationHandler)
+        
+        // Handle sharing intent
         if let url = userActivity.webpageURL {
-            return handleUrl(url: url, setInitialData: false)
+            let handled = self.handleUrl(url: url, setInitialData: false)
+            return originalResult || handled
         }
-        return false
+        
+        return originalResult
+    }
+    
+    private func checkForExistingSharedData() {
+        // Check UserDefaults for any existing shared data on app start
+        let appGroupId = Bundle.main.object(forInfoDictionaryKey: kAppGroupIdKey) as? String
+        let defaultGroupId = "group.\(Bundle.main.bundleIdentifier!)"
+        let userDefaults = UserDefaults(suiteName: appGroupId ?? defaultGroupId)
+        
+        if let json = userDefaults?.object(forKey: kUserDefaultsKey) as? Data {
+            self.processSharedData(json: json, setInitialData: true)
+        }
     }
     
     // MARK: - FlutterStreamHandler methods
@@ -97,32 +133,37 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
         let defaultGroupId = "group.\(Bundle.main.bundleIdentifier!)"
         let userDefaults = UserDefaults(suiteName: appGroupId ?? defaultGroupId)
         
-        let message = userDefaults?.string(forKey: kUserDefaultsMessageKey)
         if let json = userDefaults?.object(forKey: kUserDefaultsKey) as? Data {
-            let sharedArray = decode(data: json)
-            let sharedMediaFiles: [SharedMediaFile] = sharedArray.compactMap {
-                guard let path = $0.type == .text || $0.type == .url ? $0.path
-                        : getAbsolutePath(for: $0.path) else {
-                    return nil
-                }
-                
-                return SharedMediaFile(
-                    path: path,
-                    mimeType: $0.mimeType,
-                    thumbnail: getAbsolutePath(for: $0.thumbnail),
-                    duration: $0.duration,
-                    message: message,
-                    type: $0.type
-                )
-            }
-            latestMedia = sharedMediaFiles
-            if setInitialData {
-                initialMedia = latestMedia
-            }
-            eventSinkMedia?(toJson(data: latestMedia))
-            return true
+            return processSharedData(json: json, setInitialData: setInitialData)
         }
         return false
+    }
+    
+    private func processSharedData(json: Data, setInitialData: Bool) -> Bool {
+        let message = UserDefaults(suiteName: Bundle.main.object(forInfoDictionaryKey: kAppGroupIdKey) as? String ?? "group.\(Bundle.main.bundleIdentifier!)")?.string(forKey: kUserDefaultsMessageKey)
+        
+        let sharedArray = decode(data: json)
+        let sharedMediaFiles: [SharedMediaFile] = sharedArray.compactMap {
+            guard let path = $0.type == .text || $0.type == .url ? $0.path
+                    : getAbsolutePath(for: $0.path) else {
+                return nil
+            }
+            
+            return SharedMediaFile(
+                path: path,
+                mimeType: $0.mimeType,
+                thumbnail: getAbsolutePath(for: $0.thumbnail),
+                duration: $0.duration,
+                message: message,
+                type: $0.type
+            )
+        }
+        latestMedia = sharedMediaFiles
+        if setInitialData {
+            initialMedia = latestMedia
+        }
+        eventSinkMedia?(toJson(data: latestMedia))
+        return true
     }
     
     private func getAbsolutePath(for identifier: String?) -> String? {
