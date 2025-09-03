@@ -7,7 +7,7 @@ public let kUserDefaultsKey = "ShareKey"
 public let kUserDefaultsMessageKey = "ShareMessageKey"
 public let kAppGroupIdKey = "AppGroupId"
 
-public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
+public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, FlutterApplicationLifeCycleDelegate {
     static let kMessagesChannel = "receive_sharing_intent/messages"
     static let kEventsChannelMedia = "receive_sharing_intent/events-media"
     
@@ -16,14 +16,16 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
     
     private var eventSinkMedia: FlutterEventSink?
     
-    public static let instance = SwiftReceiveSharingIntentPlugin()
-    
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: kMessagesChannel, binaryMessenger: registrar.messenger())
+        let instance = SwiftReceiveSharingIntentPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
         
         let chargingChannelMedia = FlutterEventChannel(name: kEventsChannelMedia, binaryMessenger: registrar.messenger())
         chargingChannelMedia.setStreamHandler(instance)
+        
+        // Register as application lifecycle delegate - NO AppDelegate changes needed!
+        registrar.addApplicationDelegate(instance)
     }
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -39,23 +41,58 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
         }
     }
     
-    public func hasMatchingSchemePrefix(url: URL?) -> Bool {
+    // MARK: - FlutterApplicationLifeCycleDelegate methods
+    
+    public func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [AnyHashable : Any] = [:]) -> Bool {
+        if let url = launchOptions[UIApplication.LaunchOptionsKey.url] as? URL {
+            return handleUrl(url: url, setInitialData: true)
+        } else if let activityDictionary = launchOptions[UIApplication.LaunchOptionsKey.userActivityDictionary] as? [AnyHashable: Any] {
+            for key in activityDictionary.keys {
+                if let userActivity = activityDictionary[key] as? NSUserActivity {
+                    if let url = userActivity.webpageURL {
+                        return handleUrl(url: url, setInitialData: true)
+                    }
+                }
+            }
+        }
+        return true
+    }
+    
+    public func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        return handleUrl(url: url, setInitialData: false)
+    }
+    
+    public func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([Any]) -> Void) -> Bool {
+        if let url = userActivity.webpageURL {
+            return handleUrl(url: url, setInitialData: false)
+        }
+        return false
+    }
+    
+    // MARK: - FlutterStreamHandler methods
+    
+    public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+        eventSinkMedia = events
+        return nil
+    }
+    
+    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        eventSinkMedia = nil
+        return nil
+    }
+    
+    // MARK: - Private methods
+    
+    private func hasMatchingSchemePrefix(url: URL?) -> Bool {
         if let url = url, let appDomain = Bundle.main.bundleIdentifier {
             return url.absoluteString.hasPrefix("\(kSchemePrefix)-\(appDomain)")
         }
         return false
     }
     
-    // Public method to be called from AppDelegate
-    public func handleUrl(_ url: URL, setInitialData: Bool = false) -> Bool {
-        if hasMatchingSchemePrefix(url: url) {
-            return processSharedData(setInitialData: setInitialData)
-        }
-        return false
-    }
-    
-    // Public method to process shared data
-    public func processSharedData(setInitialData: Bool) -> Bool {
+    private func handleUrl(url: URL?, setInitialData: Bool) -> Bool {
+        guard hasMatchingSchemePrefix(url: url) else { return false }
+        
         let appGroupId = Bundle.main.object(forInfoDictionaryKey: kAppGroupIdKey) as? String
         let defaultGroupId = "group.\(Bundle.main.bundleIdentifier!)"
         let userDefaults = UserDefaults(suiteName: appGroupId ?? defaultGroupId)
@@ -86,16 +123,6 @@ public class SwiftReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterSt
             return true
         }
         return false
-    }
-    
-    public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        eventSinkMedia = events
-        return nil
-    }
-    
-    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        eventSinkMedia = nil
-        return nil
     }
     
     private func getAbsolutePath(for identifier: String?) -> String? {
