@@ -28,7 +28,9 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         let chargingChannelMedia = FlutterEventChannel(name: kEventsChannelMedia, binaryMessenger: registrar.messenger())
         chargingChannelMedia.setStreamHandler(instance)
         
+        #if !TARGET_OS_EXTENSION
         registrar.addApplicationDelegate(instance)
+        #endif
     }
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
