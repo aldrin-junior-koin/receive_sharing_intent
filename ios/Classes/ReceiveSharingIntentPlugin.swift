@@ -3,9 +3,6 @@ import UIKit
 import Photos
 import UniformTypeIdentifiers
 
-// Force Flutter module to be properly linked
-@_exported import Flutter
-
 public let kSchemePrefix = "ShareMedia"
 public let kUserDefaultsKey = "ShareKey"
 public let kUserDefaultsMessageKey = "ShareMessageKey"
@@ -20,9 +17,6 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
     
     private var eventSinkMedia: FlutterEventSink?
     
-    // Singleton is required for calling functions directly from AppDelegate
-    // - it is required if the developer is using also another library, which requires to call "application(_:open:options:)"
-    // -> see Example app
     public static let instance = ReceiveSharingIntentPlugin()
     
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -36,7 +30,8 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         
         #if !targetEnvironment(simulator)
         #if !targetEnvironment(macCatalyst)
-        if Bundle.main.bundlePath.hasSuffix(".app") {
+
+        if Bundle.main.bundleIdentifier?.hasSuffix(".app") == true {
             registrar.addApplicationDelegate(instance)
         }
         #endif

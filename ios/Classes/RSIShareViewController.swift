@@ -9,6 +9,8 @@ import UIKit
 import Social
 import MobileCoreServices
 import Photos
+import AVFoundation 
+import UniformTypeIdentifiers 
 
 @available(swift, introduced: 5.0)
 open class RSIShareViewController: SLComposeServiceViewController {
