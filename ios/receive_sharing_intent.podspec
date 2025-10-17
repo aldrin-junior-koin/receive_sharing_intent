@@ -10,20 +10,15 @@ A flutter plugin that enables flutter apps to receive sharing photos, videos, te
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
   
-  # Source files
-  s.source_files = 'Classes/**/*.{swift,h,m}'
+  s.source_files = 'Classes/**/*'
   s.public_header_files = 'Classes/**/*.h'
-  
-  # Include privacy manifest - CRITICAL for App Store
   s.resources = 'Classes/PrivacyInfo.xcprivacy'
   
   s.ios.deployment_target = '12.0'
   s.swift_version = '5.0'
   
-  # Dependencies
   s.dependency 'Flutter'
   
-  # Pod target configuration
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386'

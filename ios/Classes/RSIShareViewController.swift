@@ -1,16 +1,9 @@
-//
-//  RSIShareViewController.swift
-//  receive_sharing_intent
-//
-//  Created by Kasem Mohamed on 2024-01-25.
-//
-
 import UIKit
 import Social
 import MobileCoreServices
 import Photos
-import AVFoundation 
-import UniformTypeIdentifiers 
+import AVFoundation
+import UniformTypeIdentifiers
 
 @available(swift, introduced: 5.0)
 open class RSIShareViewController: SLComposeServiceViewController {
@@ -18,8 +11,6 @@ open class RSIShareViewController: SLComposeServiceViewController {
     var appGroupId = ""
     var sharedMedia: [SharedMediaFile] = []
 
-    /// Override this method to return false if you don't want to redirect to host app automatically
-    /// Default is true
     open func shouldAutoRedirect() -> Bool {
         return true
     }
@@ -30,12 +21,9 @@ open class RSIShareViewController: SLComposeServiceViewController {
     
     open override func viewDidLoad() {
         super.viewDidLoad()
-        
-        // load group and app id from build info
         loadIds()
     }
     
-    // Redirect to host app when user click on Post
     open override func didSelectPost() {
         saveAndRedirect(message: contentText)
     }
@@ -43,7 +31,6 @@ open class RSIShareViewController: SLComposeServiceViewController {
     open override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
-        // This is called after the user selects Post. Do the upload of contentText and/or NSExtensionContext attachments.
         if let content = extensionContext!.inputItems[0] as? NSExtensionItem {
             if let contents = content.attachments {
                 for (index, attachment) in (contents).enumerated() {
@@ -93,29 +80,19 @@ open class RSIShareViewController: SLComposeServiceViewController {
     }
     
     open override func configurationItems() -> [Any]! {
-        // To add configuration options via table cells at the bottom of the sheet, return an array of SLComposeSheetConfigurationItem here.
         return []
     }
     
     private func loadIds() {
-        // loading Share extension App Id
         let shareExtensionAppBundleIdentifier = Bundle.main.bundleIdentifier!
         
-        
-        // extract host app bundle id from ShareExtension id
-        // by default it's <hostAppBundleIdentifier>.<ShareExtension>
-        // for example: "com.kasem.sharing.Share-Extension" -> com.kasem.sharing
         let lastIndexOfPoint = shareExtensionAppBundleIdentifier.lastIndex(of: ".")
         hostAppBundleIdentifier = String(shareExtensionAppBundleIdentifier[..<lastIndexOfPoint!])
         let defaultAppGroupId = "group.\(hostAppBundleIdentifier)"
         
-        
-        // loading custom AppGroupId from Build Settings or use group.<hostAppBundleIdentifier>
         let customAppGroupId = Bundle.main.object(forInfoDictionaryKey: kAppGroupIdKey) as? String
-        
         appGroupId = customAppGroupId ?? defaultAppGroupId
     }
-    
     
     private func handleMedia(forLiteral item: String, type: SharedMediaType, index: Int, content: NSExtensionItem) {
         sharedMedia.append(SharedMediaFile(
@@ -152,10 +129,8 @@ open class RSIShareViewController: SLComposeServiceViewController {
         let newPath = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupId)!.appendingPathComponent(fileName)
         
         if copyFile(at: url, to: newPath) {
-            // The path should be decoded because Flutter is not expecting url encoded file names
             let newPathDecoded = newPath.absoluteString.removingPercentEncoding!;
             if type == .video {
-                // Get video thumbnail and duration
                 if let videoInfo = getVideoInfo(from: url) {
                     let thumbnailPathDecoded = videoInfo.thumbnail?.removingPercentEncoding;
                     sharedMedia.append(SharedMediaFile(
@@ -182,8 +157,6 @@ open class RSIShareViewController: SLComposeServiceViewController {
         }
     }
     
-    
-    // Save shared media and redirect to host app
     private func saveAndRedirect(message: String? = nil) {
         let userDefaults = UserDefaults(suiteName: appGroupId)
         userDefaults?.set(toData(data: sharedMedia), forKey: kUserDefaultsKey)
@@ -193,7 +166,6 @@ open class RSIShareViewController: SLComposeServiceViewController {
     }
     
     private func redirectToHostApp() {
-        // ids may not loaded yet so we need loadIds here too
         loadIds()
         let url = URL(string: "\(kSchemePrefix)-\(hostAppBundleIdentifier):share")
         var responder = self as UIResponder?
@@ -288,7 +260,6 @@ open class RSIShareViewController: SLComposeServiceViewController {
         var saved = false
         let assetImgGenerate = AVAssetImageGenerator(asset: asset)
         assetImgGenerate.appliesPreferredTrackTransform = true
-        //        let scale = UIScreen.main.scale
         assetImgGenerate.maximumSize =  CGSize(width: 360, height: 360)
         do {
             let img = try assetImgGenerate.copyCGImage(at: CMTimeMakeWithSeconds(600, preferredTimescale: 1), actualTime: nil)

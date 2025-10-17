@@ -8,7 +8,7 @@ public let kUserDefaultsKey = "ShareKey"
 public let kUserDefaultsMessageKey = "ShareMessageKey"
 public let kAppGroupIdKey = "AppGroupId"
 
-public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, FlutterApplicationLifeCycleDelegate {
+public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     static let kMessagesChannel = "receive_sharing_intent/messages"
     static let kEventsChannelMedia = "receive_sharing_intent/events-media"
     
@@ -17,6 +17,7 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
     
     private var eventSinkMedia: FlutterEventSink?
     
+    // Singleton is required for calling functions directly from AppDelegate
     public static let instance = ReceiveSharingIntentPlugin()
     
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -28,18 +29,17 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         let chargingChannelMedia = FlutterEventChannel(name: kEventsChannelMedia, binaryMessenger: registrar.messenger())
         chargingChannelMedia.setStreamHandler(instance)
         
-        #if !targetEnvironment(simulator)
-        #if !targetEnvironment(macCatalyst)
-
-        if Bundle.main.bundleIdentifier?.hasSuffix(".app") == true {
+        // Check if we're in an app extension - if not, register application delegate
+        if !isAppExtension() {
+            #if !targetEnvironment(simulator)
+            #if !targetEnvironment(macCatalyst)
             registrar.addApplicationDelegate(instance)
+            #endif
+            #endif
         }
-        #endif
-        #endif
     }
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        
         switch call.method {
         case "getInitialMedia":
             result(toJson(data: self.initialMedia))
@@ -52,8 +52,12 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         }
     }
     
+    // Check if we're running in an app extension
+    private static func isAppExtension() -> Bool {
+        return Bundle.main.bundlePath.hasSuffix(".appex")
+    }
+    
     // By Adding bundle id to prefix, we'll ensure that the correct application will be opened
-    // - found the issue while developing multiple applications using this library, after "application(_:open:options:)" is called, the first app using this librabry (first app by bundle id alphabetically) is opened
     public func hasMatchingSchemePrefix(url: URL?) -> Bool {
         if let url = url, let appDomain = Bundle.main.bundleIdentifier {
             return url.absoluteString.hasPrefix("\(kSchemePrefix)-\(appDomain)")
@@ -61,12 +65,7 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         return false
     }
     
-    // This is the function called on app startup with a shared link if the app had been closed already.
-    // It is called as the launch process is finishing and the app is almost ready to run.
-    // If the URL includes the module's ShareMedia prefix, then we process the URL and return true if we know how to handle that kind of URL or false if the app is not able to.
-    // If the URL does not include the module's prefix, we must return true since while our module cannot handle the link, other modules might be and returning false can prevent
-    // them from getting the chance to.
-    // Reference: https://developer.apple.com/documentation/uikit/uiapplicationdelegate/1622921-application
+    // Application lifecycle methods - only called if not in extension
     public func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [AnyHashable : Any] = [:]) -> Bool {
         if let url = launchOptions[UIApplication.LaunchOptionsKey.url] as? URL {
             if (hasMatchingSchemePrefix(url: url)) {
@@ -74,7 +73,6 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
             }
             return true
         } else if let activityDictionary = launchOptions[UIApplication.LaunchOptionsKey.userActivityDictionary] as? [AnyHashable: Any] {
-            // Handle multiple URLs shared in
             for key in activityDictionary.keys {
                 if let userActivity = activityDictionary[key] as? NSUserActivity {
                     if let url = userActivity.webpageURL {
@@ -89,11 +87,6 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         return true
     }
     
-    // This is the function called on resuming the app from a shared link.
-    // It handles requests to open a resource by a specified URL. Returning true means that it was handled successfully, false means the attempt to open the resource failed.
-    // If the URL includes the module's ShareMedia prefix, then we process the URL and return true if we know how to handle that kind of URL or false if we are not able to.
-    // If the URL does not include the module's prefix, then we return false to indicate our module's attempt to open the resource failed and others should be allowed to.
-    // Reference: https://developer.apple.com/documentation/uikit/uiapplicationdelegate/1623112-application
     public func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
         if (hasMatchingSchemePrefix(url: url)) {
             return handleUrl(url: url, setInitialData: false)
@@ -101,12 +94,6 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         return false
     }
     
-    // This function is called by other modules like Firebase DeepLinks.
-    // It tells the delegate that data for continuing an activity is available. Returning true means that our module handled the activity and that others do not have to. Returning false tells
-    // iOS that our app did not handle the activity.
-    // If the URL includes the module's ShareMedia prefix, then we process the URL and return true if we know how to handle that kind of URL or false if we are not able to.
-    // If the URL does not include the module's prefix, then we must return false to indicate that this module did not handle the prefix and that other modules should try to.
-    // Reference: https://developer.apple.com/documentation/uikit/uiapplicationdelegate/1623072-application
     public func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([Any]) -> Void) -> Bool {
         if let url = userActivity.webpageURL {
             if (hasMatchingSchemePrefix(url: url)) {
@@ -148,7 +135,6 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         return true
     }
     
-    
     public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
         eventSinkMedia = events
         return nil
@@ -176,7 +162,6 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         
         let (url, _) = getFullSizeImageURLAndOrientation(for: phAsset)
         return url
-        
     }
     
     private func getFullSizeImageURLAndOrientation(for asset: PHAsset)-> (String?, Int) {
@@ -217,7 +202,6 @@ public class SharedMediaFile: Codable {
     var message: String? // post message
     var type: SharedMediaType
     
-    
     public init(
         path: String,
         mimeType: String? = nil,
@@ -238,7 +222,6 @@ public enum SharedMediaType: String, Codable, CaseIterable {
     case image
     case video
     case text
-    // case audio
     case file
     case url
 
@@ -251,8 +234,6 @@ public enum SharedMediaType: String, Codable, CaseIterable {
                 return UTType.movie.identifier
             case .text:
                 return UTType.text.identifier
-            // case .audio:
-            //     return UTType.audio.identifier
             case .file:
                 return UTType.fileURL.identifier
             case .url:
@@ -266,8 +247,6 @@ public enum SharedMediaType: String, Codable, CaseIterable {
             return "public.movie"
         case .text:
             return "public.text"
-        // case .audio:
-        //     return "public.audio"
         case .file:
             return "public.file-url"
         case .url:
