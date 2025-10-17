@@ -1,13 +1,17 @@
 import Flutter
 import UIKit
 import Photos
+import UniformTypeIdentifiers
+
+// Force Flutter module to be properly linked
+@_exported import Flutter
 
 public let kSchemePrefix = "ShareMedia"
 public let kUserDefaultsKey = "ShareKey"
 public let kUserDefaultsMessageKey = "ShareMessageKey"
 public let kAppGroupIdKey = "AppGroupId"
 
-public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
+public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, FlutterApplicationLifeCycleDelegate {
     static let kMessagesChannel = "receive_sharing_intent/messages"
     static let kEventsChannelMedia = "receive_sharing_intent/events-media"
     
@@ -23,13 +27,19 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
     
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: kMessagesChannel, binaryMessenger: registrar.messenger())
+        let instance = ReceiveSharingIntentPlugin()
+        
         registrar.addMethodCallDelegate(instance, channel: channel)
         
         let chargingChannelMedia = FlutterEventChannel(name: kEventsChannelMedia, binaryMessenger: registrar.messenger())
         chargingChannelMedia.setStreamHandler(instance)
         
-        #if !TARGET_OS_EXTENSION
-        registrar.addApplicationDelegate(instance)
+        #if !targetEnvironment(simulator)
+        #if !targetEnvironment(macCatalyst)
+        if Bundle.main.bundlePath.hasSuffix(".app") {
+            registrar.addApplicationDelegate(instance)
+        }
+        #endif
         #endif
     }
     
@@ -203,7 +213,6 @@ public class ReceiveSharingIntentPlugin: NSObject, FlutterPlugin, FlutterStreamH
         return json
     }
 }
-
 
 public class SharedMediaFile: Codable {
     var path: String
