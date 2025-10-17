@@ -6,8 +6,10 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 void main() => runApp(MyApp());
 
 class MyApp extends StatefulWidget {
+  const MyApp({Key? key}) : super(key: key);
+
   @override
-  _MyAppState createState() => _MyAppState();
+  State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
@@ -51,7 +53,7 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    const textStyleBold = const TextStyle(fontWeight: FontWeight.bold);
+    const textStyleBold = TextStyle(fontWeight: FontWeight.bold);
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(
